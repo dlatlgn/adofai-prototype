@@ -81,6 +81,9 @@ const OV_BAR_H: float = 8.0
 # 배경 땡땡이
 var _bg_dots: BackgroundDots
 
+# 판정 팝업 (공 뒤에 뜨는 필기체 소형 라벨)
+var _popup: JudgmentPopup
+
 # ── 게임 상태 ──
 var pivot_idx: int = 0
 var running: bool = false
@@ -157,6 +160,11 @@ func _ready() -> void:
 	track.name = "Track"
 	track.build_from_directions(_stage["path"])
 	add_child(track)
+
+	# 판정 팝업 : PlanetPair보다 먼저 add → Z-order에서 공 뒤에 렌더
+	_popup = JudgmentPopup.new()
+	_popup.name = "JudgmentPopup"
+	add_child(_popup)
 
 	# PlanetPair
 	pair = PlanetPair.new()
@@ -383,27 +391,24 @@ func _try_hit() -> void:
 func _apply_judgment(j: int) -> void:
 	match j:
 		J.PERFECT:
-			_register_landed("정확", 300, COL_PERFECT, true)
+			_register_landed("Perfect!", 300, COL_PERFECT, true)
 			perfect_count += 1
 		J.E_PERFECT:
-			_register_landed("빠름", 250, COL_E_PERFECT, false)
+			_register_landed("EPerfect!", 250, COL_E_PERFECT, false)
 			e_perfect_count += 1
 		J.L_PERFECT:
-			_register_landed("느림", 250, COL_L_PERFECT, false)
+			_register_landed("LPerfect!", 250, COL_L_PERFECT, false)
 			l_perfect_count += 1
 		J.EARLY:
-			_register_landed("빠름!", 150, COL_EARLY, false)
+			_register_landed("Early!", 150, COL_EARLY, false)
 			early_count += 1
 		J.LATE:
-			_register_landed("느림!", 150, COL_LATE, false)
+			_register_landed("Late!", 150, COL_LATE, false)
 			late_count += 1
 		J.EARLY_2:
 			_register_early2()
 		J.LATE_2:
-			if FAILURE_PREVENTION:
-				_register_miss()
-			else:
-				_register_miss()  # 프로토타입 : 실패 방지 항상 ON
+			_register_miss()  # 실패 방지 ON 상수 → 놓침... 표시
 
 # ── 착지 성공 (정확 ~ 느림!) ──
 func _register_landed(text: String, pts: int, color: Color, is_perfect: bool) -> void:
@@ -429,7 +434,7 @@ func _register_landed(text: String, pts: int, color: Color, is_perfect: bool) ->
 func _register_early2() -> void:
 	combo = 0
 	early2_count += 1
-	_show_judgment("빠름!!", COL_EARLY_2)
+	_show_judgment("Early!!", COL_EARLY_2)
 	_trigger_flash(Color.WHITE, 0.08 * _diff_mult)
 	_shake_intensity = 4.0 * _diff_mult
 	_shake_time      = 0.18
@@ -441,7 +446,7 @@ func _register_early2() -> void:
 func _register_miss() -> void:
 	combo = 0
 	miss_count += 1
-	var text: String = "놓침..." if FAILURE_PREVENTION else "느림!!"
+	var text: String = "Miss..." if FAILURE_PREVENTION else "Late!!"
 	var col: Color   = COL_MISS   if FAILURE_PREVENTION else COL_LATE_2
 	_show_judgment(text, col)
 	_trigger_flash(Color.WHITE, 0.10 * _diff_mult)
@@ -464,7 +469,7 @@ func _add_overload(amount: float) -> void:
 func _trigger_overload() -> void:
 	overload_gauge = 0.0
 	overload_count += 1
-	_show_judgment("과부하...", COL_OVERLOAD)
+	_show_judgment("Overload...", COL_OVERLOAD)
 	_trigger_flash(Color.WHITE, 0.22 * _diff_mult)
 	_shake_intensity = 10.0 * _diff_mult
 	_shake_time      = 0.40
@@ -555,11 +560,21 @@ func _game_clear() -> void:
 	var pure: bool = _is_pure_perfect()
 	var title: String = "★  PURE PERFECT!  ★" if pure else "★  CLEAR  ★"
 
-	# 결과 화면용으로 라벨 크기·폰트 축소
+	# 결과 화면 : 흰색 + 그림자로 뚜렷하게
 	var vp: Vector2 = get_viewport_rect().size
 	_judgment_lbl.size     = Vector2(vp.x, vp.y * 0.75)
 	_judgment_lbl.position = Vector2(0, vp.y * 0.12)
-	_judgment_lbl.add_theme_font_size_override("font_size", 26)
+
+	var settings := LabelSettings.new()
+	settings.font_size      = 26
+	settings.font_color     = Color.WHITE
+	settings.shadow_size    = 6
+	settings.shadow_color   = Color(0, 0, 0, 0.85)
+	settings.shadow_offset  = Vector2(3, 3)
+	settings.outline_size   = 2
+	settings.outline_color  = Color(0, 0, 0, 0.65)
+	_judgment_lbl.label_settings = settings
+	_judgment_lbl.modulate = Color.WHITE
 
 	_judgment_lbl.text = "%s\n\nSCORE  %d    MAX COMBO  %d    ACC  %.2f%%\n\n정확 %d   빠름 %d   느림 %d\n빠름! %d   느림! %d   빠름!! %d\n놓침 %d   과부하 %d\n\nENTER / SPACE 로 메뉴" % [
 		title, score, max_combo, _get_accuracy(),
@@ -567,7 +582,6 @@ func _game_clear() -> void:
 		early_count, late_count, early2_count,
 		miss_count, overload_count
 	]
-	_judgment_lbl.modulate = COL_PERFECT if pure else Color.GOLD
 	_j_timer = 99999.0
 
 func _spawn_explosion(pos: Vector2, color: Color, amount: int) -> void:
@@ -601,9 +615,8 @@ func _trigger_flash(_color: Color, alpha: float) -> void:
 func _show_judgment(text: String, color: Color) -> void:
 	if _cleared:
 		return
-	_judgment_lbl.text     = text
-	_judgment_lbl.modulate = color
-	_j_timer = 0.35
+	if _popup != null and pair != null:
+		_popup.show_judgment(text, color, pair.pivot_pos)
 
 func _get_accuracy() -> float:
 	var total: int = maxi(pivot_idx, 1)

@@ -50,15 +50,23 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	# 1. 도로 리본
+	# 1. 지나온 관절 뒤에 흰빛 글로우 (관절보다 먼저 → 뒤에 렌더)
+	for i in range(current_tile):
+		var dist: int = current_tile - i
+		var glow_a: float = maxf(0.05, 0.40 - dist * 0.025)
+		# 넓은 옅은 링 + 좁은 밝은 링 (이중 글로우)
+		draw_circle(tiles[i], JOINT_R + 10.0, Color(1, 1, 1, glow_a * 0.28))
+		draw_circle(tiles[i], JOINT_R + 4.0, Color(1, 1, 1, glow_a * 0.45))
+
+	# 2. 도로 리본
 	for i in range(tiles.size() - 1):
 		draw_line(tiles[i], tiles[i + 1], _road_color(i), ROAD_WIDTH, true)
 
-	# 2. 관절 (둥근 이음매)
+	# 3. 관절 (둥근 이음매)
 	for i in tiles.size():
 		draw_circle(tiles[i], JOINT_R, _joint_color(i))
 
-	# 3. 소도트 (박자 마커) — 지나온 곳은 그냥 흐리게
+	# 4. 소도트 (박자 마커)
 	for i in tiles.size():
 		var col: Color = _dot_color(i)
 		if col.a > 0.0:
@@ -110,20 +118,20 @@ func _draw() -> void:
 # ── 색상 헬퍼 ──
 func _road_color(i: int) -> Color:
 	if i < current_tile:
-		# 지나온 : 뒤로 갈수록 더 어둡게 페이드
+		# 지나온 : 흰빛으로 빛나되 거리에 따라 페이드
 		var dist: int = current_tile - i
-		var fade: float = maxf(0.10, 0.25 - dist * 0.015)
-		return Color(fade, fade, fade * 1.1)
+		var fade: float = maxf(0.35, 0.90 - dist * 0.03)
+		return Color(fade, fade, fade * 1.02)
 	elif i < current_tile + 3:
-		return Color(0.45, 0.47, 0.66)   # 활성 구간
+		return Color(0.45, 0.47, 0.66)
 	else:
-		return Color(0.32, 0.34, 0.50)   # 앞으로 갈 곳
+		return Color(0.32, 0.34, 0.50)
 
 func _joint_color(i: int) -> Color:
 	if i < current_tile:
 		var dist: int = current_tile - i
-		var fade: float = maxf(0.10, 0.25 - dist * 0.015)
-		return Color(fade, fade, fade * 1.1)
+		var fade: float = maxf(0.40, 0.95 - dist * 0.03)
+		return Color(fade, fade, fade * 1.02)
 	elif i <= current_tile + 3:
 		return Color(0.45, 0.47, 0.66)
 	else:
@@ -131,8 +139,8 @@ func _joint_color(i: int) -> Color:
 
 func _dot_color(i: int) -> Color:
 	if i == current_tile or i == current_tile + 1 or i == tiles.size() - 1:
-		return Color(0, 0, 0, 0)  # 별도 강조되므로 스킵
+		return Color(0, 0, 0, 0)
 	elif i < current_tile:
-		return Color(1, 1, 1, 0.10)  # 지나온 : 그냥 흐린 흰 도트
+		return Color(0, 0, 0, 0)  # 관절 자체가 이미 흰빛 → 도트 생략
 	else:
 		return Color(1, 1, 1, 0.40)
