@@ -168,8 +168,8 @@ func _process(delta: float) -> void:
 		if _j_timer <= 0.0 and not _cleared:
 			_judgment_lbl.text = ""
 
-	# 자동 미스
-	if running and pair.elapsed > pair.beat_time + T_BAD:
+	# 자동 미스 : 타겟 도달 즉시 (잔류 시간 삭제)
+	if running and pair.elapsed > pair.beat_time:
 		_register_miss()
 		_advance()
 
@@ -238,6 +238,10 @@ func _try_hit() -> void:
 	if not running:
 		return
 	var diff: float     = pair.elapsed - pair.beat_time
+	# 자동 미스 직후 다음 회전으로 넘어간 상황에서 늦은 입력이 이중 진행을 일으키지 않도록,
+	# 판정창 밖의 극단적 조기 입력은 무시.
+	if diff < -T_BAD:
+		return
 	var abs_diff: float = absf(diff)
 
 	if abs_diff <= T_PERFECT:
