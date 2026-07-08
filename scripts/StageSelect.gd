@@ -45,11 +45,11 @@ func _ready() -> void:
 	add_child(subtitle)
 
 	# ── 스테이지 리스트 ──
-	var list_top: float = 240.0
-	var row_h: float    = 56.0
+	var list_top: float = 220.0
+	var row_h: float    = 46.0
 	for i in StageData.stages.size():
 		var lbl := Label.new()
-		lbl.add_theme_font_size_override("font_size", 28)
+		lbl.add_theme_font_size_override("font_size", 24)
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.size = Vector2(vp.x, row_h)
 		lbl.position = Vector2(0, list_top + i * row_h)
@@ -57,10 +57,10 @@ func _ready() -> void:
 		_stage_labels.append(lbl)
 
 	# ── 하단: 난이도 · 설명 · 안내 ──
-	var bottom_y: float = list_top + StageData.stages.size() * row_h + 30.0
+	var bottom_y: float = list_top + StageData.stages.size() * row_h + 20.0
 
 	_diff_label = Label.new()
-	_diff_label.add_theme_font_size_override("font_size", 22)
+	_diff_label.add_theme_font_size_override("font_size", 20)
 	_diff_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_diff_label.size = Vector2(vp.x, 30)
 	_diff_label.position = Vector2(0, bottom_y)
@@ -68,10 +68,10 @@ func _ready() -> void:
 	add_child(_diff_label)
 
 	_desc_label = Label.new()
-	_desc_label.add_theme_font_size_override("font_size", 20)
+	_desc_label.add_theme_font_size_override("font_size", 18)
 	_desc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_desc_label.size = Vector2(vp.x, 34)
-	_desc_label.position = Vector2(0, bottom_y + 40)
+	_desc_label.size = Vector2(vp.x, 30)
+	_desc_label.position = Vector2(0, bottom_y + 34)
 	_desc_label.modulate = Color(0.75, 0.78, 0.90)
 	add_child(_desc_label)
 
