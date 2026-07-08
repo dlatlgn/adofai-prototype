@@ -1,9 +1,62 @@
 extends Node2D
 
-# ── 판정 창 (초) ──
-const T_PERFECT: float = 0.055
-const T_GOOD: float    = 0.110
-const T_BAD: float     = 0.170
+# ══════════════════════════════════════════════════════════════════════
+#  얼불춤 판정 시스템 (ADOFAI 기반)
+# ══════════════════════════════════════════════════════════════════════
+#
+#  각도-ms 이중 판정 : 둘 중 관대한 쪽을 채택
+#  · 정확     : ±30° 또는 ±25ms
+#  · 빠름/느림 : ±45° 또는 ±30ms
+#  · 빠름!/느림! : ±60° 또는 ±40ms
+#  · 빠름!! : 위보다 더 빠름 → 착지 X, 회전 유지, 과부하 게이지 채움
+#  · 느림!! : 위보다 더 느림 → 죽음 (실패 방지 ON 시 놓침... 표시 후 자동 진행)
+#  · 과부하  : 과부하 게이지 만렙 도달
+#
+#  콤보 = 정확 판정만 카운트 (그 외 즉시 리셋)
+#  정확도(%) = 정확×0.01 + (정확+빠름+느림)×100 / 전체
+# ══════════════════════════════════════════════════════════════════════
+
+enum J {
+	PERFECT,      # 정확
+	E_PERFECT,    # 빠름 (조기)
+	L_PERFECT,    # 느림 (지연)
+	EARLY,        # 빠름!
+	LATE,         # 느림!
+	EARLY_2,      # 빠름!! : 착지 실패
+	LATE_2,       # 느림!! : 죽음
+	MISS,         # 놓침... : 실패 방지 시 대체 라벨
+	OVERLOAD,     # 과부하...
+}
+
+# 판정 임계값
+const T_PERFECT_MS: float  = 0.025
+const T_LPERFECT_MS: float = 0.030
+const T_LATE_MS: float     = 0.040
+
+const T_PERFECT_DEG: float  = 30.0
+const T_LPERFECT_DEG: float = 45.0
+const T_LATE_DEG: float     = 60.0
+
+# 실패 방지 (놓침/과부하가 게임오버 대신 라벨 표시로 처리됨)
+const FAILURE_PREVENTION: bool = true
+
+# 과부하 게이지
+const OVERLOAD_MAX: float      = 100.0
+const OVERLOAD_ADD_E2: float   = 32.0   # 빠름!! 발생 시 증가량
+const OVERLOAD_ADD_MISS: float = 40.0   # 놓침... 발생 시 증가량
+# 감소 속도 : BPM * 이 계수 per sec (BPM 120 → 44/s, BPM 180 → 66/s)
+const OVERLOAD_DRAIN_MULT: float = 0.37
+
+# 판정 색상
+const COL_PERFECT: Color   = Color(1.00, 0.40, 0.80)
+const COL_E_PERFECT: Color = Color(0.35, 0.85, 1.00)
+const COL_L_PERFECT: Color = Color(1.00, 0.85, 0.45)
+const COL_EARLY: Color     = Color(0.45, 0.55, 1.00)
+const COL_LATE: Color      = Color(1.00, 0.55, 0.20)
+const COL_EARLY_2: Color   = Color(0.95, 0.40, 0.55)
+const COL_LATE_2: Color    = Color(0.95, 0.30, 0.30)
+const COL_MISS: Color      = Color(0.90, 0.30, 0.30)
+const COL_OVERLOAD: Color  = Color(1.00, 0.20, 0.20)
 
 # ── 씬 노드 ──
 var track: Track
@@ -16,8 +69,14 @@ var _combo_lbl: Label
 var _judgment_lbl: Label
 var _hint_lbl: Label
 var _tile_info_lbl: Label
+var _acc_lbl: Label
 var _stage_lbl: Label
 var _flash_rect: ColorRect
+var _ov_label_lbl: Label
+var _ov_bg: ColorRect
+var _ov_fill: ColorRect
+const OV_BAR_W: float = 200.0
+const OV_BAR_H: float = 8.0
 
 # 배경 땡땡이
 var _bg_dots: BackgroundDots
@@ -31,24 +90,31 @@ var _j_timer: float = 0.0
 var score: int = 0
 var combo: int = 0
 var max_combo: int = 0
-var perfect_count: int = 0
-var good_count: int = 0
-var bad_count: int = 0
-var miss_count: int = 0
 
-# 화면 플래시 (아주 여린 흰색으로 통일)
+# 판정 카운터 (9종)
+var perfect_count: int   = 0
+var e_perfect_count: int = 0
+var l_perfect_count: int = 0
+var early_count: int     = 0
+var late_count: int      = 0
+var early2_count: int    = 0
+var miss_count: int      = 0    # Late!! / 놓침...
+var overload_count: int  = 0
+
+# 과부하
+var overload_gauge: float = 0.0
+
+# 화면 플래시
 var _flash_alpha: float = 0.0
 
 # 카메라 셰이크
 var _shake_time: float = 0.0
 var _shake_intensity: float = 0.0
 
-# 카메라 회전 임펄스 (난이도 3+)
+# 카메라 회전/줌 임펄스
 const CAM_IMPULSE_DUR: float = 0.32
 var _rot_target: float = 0.0
 var _rot_time: float = 0.0
-
-# 카메라 줌 임펄스 (난이도 4+)
 var _zoom_target: float = 1.0
 var _zoom_time: float = 0.0
 
@@ -62,37 +128,37 @@ var _beat_time: float = 0.5
 var _difficulty: int = 1
 var _diff_mult: float = 1.0
 
+# ══════════════════════════════════════════════════════════════════════
+#  초기화
+# ══════════════════════════════════════════════════════════════════════
 func _ready() -> void:
 	var vp: Vector2 = get_viewport_rect().size
 
-	# ── 검은 배경 ──
 	RenderingServer.set_default_clear_color(Color.BLACK)
 
-	# ── 배경 땡땡이 (게임 월드 뒤 CanvasLayer) ──
+	# 배경 땡땡이
 	var bg_layer := CanvasLayer.new()
 	bg_layer.name  = "BG"
 	bg_layer.layer = -1
 	add_child(bg_layer)
-
 	_bg_dots = BackgroundDots.new()
 	_bg_dots.viewport_size = vp
 	bg_layer.add_child(_bg_dots)
 
-	# ── 스테이지 로드 ──
+	# 스테이지 로드
 	_stage      = StageData.current()
 	_bpm        = float(_stage["bpm"])
 	_beat_time  = 60.0 / _bpm
 	_difficulty = int(_stage.get("difficulty", 1))
-	# 난이도별 이펙트 세기 배수 (1.0 → 2.4)
 	_diff_mult  = 1.0 + float(_difficulty - 1) * 0.35
 
-	# ── Track ──
+	# Track
 	track = Track.new()
 	track.name = "Track"
 	track.build_from_directions(_stage["path"])
 	add_child(track)
 
-	# ── PlanetPair ──
+	# PlanetPair
 	pair = PlanetPair.new()
 	pair.name = "PlanetPair"
 	add_child(pair)
@@ -100,7 +166,7 @@ func _ready() -> void:
 	track.position = Vector2.ZERO
 	pair.position  = Vector2.ZERO
 
-	# ── Camera ──
+	# Camera
 	cam = Camera2D.new()
 	cam.name = "Cam"
 	cam.position_smoothing_enabled = true
@@ -109,12 +175,11 @@ func _ready() -> void:
 	add_child(cam)
 	cam.make_current()
 
-	# ── UI ──
+	# UI
 	var ui := CanvasLayer.new()
 	ui.name = "UI"
 	add_child(ui)
 
-	# 화면 플래시 오버레이 (판정용)
 	_flash_rect = ColorRect.new()
 	_flash_rect.size = vp
 	_flash_rect.color = Color(1, 1, 1, 0)
@@ -129,6 +194,7 @@ func _ready() -> void:
 	_score_lbl     = _mk_label(ui, Vector2(24, 52), 30, Color.WHITE)
 	_combo_lbl     = _mk_label(ui, Vector2(24, 92), 42, Color.YELLOW)
 	_tile_info_lbl = _mk_label(ui, Vector2(24, 148), 18, Color(0.7, 0.7, 0.85))
+	_acc_lbl       = _mk_label(ui, Vector2(24, 172), 18, Color(0.75, 0.90, 0.75))
 
 	_judgment_lbl = Label.new()
 	_judgment_lbl.add_theme_font_size_override("font_size", 60)
@@ -136,6 +202,24 @@ func _ready() -> void:
 	_judgment_lbl.size     = Vector2(vp.x, 110)
 	_judgment_lbl.position = Vector2(0, vp.y * 0.14)
 	ui.add_child(_judgment_lbl)
+
+	# 과부하 게이지 (우상단)
+	_ov_label_lbl = _mk_label(ui, Vector2(vp.x - OV_BAR_W - 24, 18), 14, Color(0.75, 0.75, 0.85))
+	_ov_label_lbl.text = "OVERLOAD"
+
+	_ov_bg = ColorRect.new()
+	_ov_bg.size = Vector2(OV_BAR_W, OV_BAR_H)
+	_ov_bg.position = Vector2(vp.x - OV_BAR_W - 24, 44)
+	_ov_bg.color = Color(0.15, 0.15, 0.20, 0.55)
+	_ov_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_ov_bg)
+
+	_ov_fill = ColorRect.new()
+	_ov_fill.size = Vector2(0, OV_BAR_H)
+	_ov_fill.position = _ov_bg.position
+	_ov_fill.color = Color(1.0, 0.35, 0.35)
+	_ov_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_ov_fill)
 
 	_hint_lbl = Label.new()
 	_hint_lbl.text = "SPACE 리듬에 맞춰 눌러 다음 타일로!    |    ESC 메뉴로"
@@ -157,7 +241,6 @@ func _mk_label(parent: Node, pos: Vector2, size: int, color: Color) -> Label:
 	parent.add_child(l)
 	return l
 
-# 짧은 카운트인 후 시작
 func _ready_and_go() -> void:
 	_judgment_lbl.text     = "READY..."
 	_judgment_lbl.modulate = Color(0.65, 0.80, 1.00)
@@ -171,7 +254,9 @@ func _ready_and_go() -> void:
 	_judgment_lbl.text = ""
 	_start_next_rotation()
 
-# ── 프레임 업데이트 ──
+# ══════════════════════════════════════════════════════════════════════
+#  프레임 업데이트
+# ══════════════════════════════════════════════════════════════════════
 func _process(delta: float) -> void:
 	_time += delta
 
@@ -180,10 +265,16 @@ func _process(delta: float) -> void:
 		if _j_timer <= 0.0 and not _cleared:
 			_judgment_lbl.text = ""
 
-	# 자동 미스 : 타겟 도달 즉시 (잔류 시간 삭제)
-	if running and pair.elapsed > pair.beat_time:
-		_register_miss()
-		_advance()
+	# 자동 미스 : Late! 상한(60°/40ms 중 큰 쪽) 넘으면 Late!! → 놓침...
+	if running:
+		var late_bound: float = _late_bound_seconds()
+		if pair.elapsed > pair.beat_time + late_bound:
+			_apply_judgment(J.LATE_2)
+
+	# 과부하 게이지 자연 감쇠
+	if overload_gauge > 0.0:
+		overload_gauge = maxf(0.0, overload_gauge - _bpm * OVERLOAD_DRAIN_MULT * delta)
+		_update_overload_ui()
 
 	# 카메라 팔로우 + 셰이크
 	if cam != null and pair != null:
@@ -199,7 +290,6 @@ func _process(delta: float) -> void:
 		else:
 			cam.offset = Vector2.ZERO
 
-		# 카메라 회전 : 임펄스(감쇠) + 난이도 5의 상시 웨이브
 		var impulse_rot: float = 0.0
 		if _rot_time > 0.0:
 			_rot_time = maxf(0.0, _rot_time - delta)
@@ -210,7 +300,6 @@ func _process(delta: float) -> void:
 			wobble = sin(_time * 2.4) * 0.015
 		cam.rotation = impulse_rot + wobble
 
-		# 카메라 줌 임펄스 감쇠 (기본 1.0으로 복귀)
 		if _zoom_time > 0.0:
 			_zoom_time = maxf(0.0, _zoom_time - delta)
 			var zf: float = _zoom_time / CAM_IMPULSE_DUR
@@ -219,12 +308,14 @@ func _process(delta: float) -> void:
 			if _zoom_time <= 0.0:
 				cam.zoom = Vector2.ONE
 
-	# 화면 플래시 페이드 (아주 여린 흰색)
+	# 화면 플래시 (여린 흰색)
 	if _flash_alpha > 0.0:
 		_flash_alpha = maxf(0.0, _flash_alpha - delta * 3.5)
 		_flash_rect.color = Color(1.0, 1.0, 1.0, _flash_alpha)
 
-# ── 입력 ──
+# ══════════════════════════════════════════════════════════════════════
+#  입력
+# ══════════════════════════════════════════════════════════════════════
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
@@ -248,80 +339,159 @@ func _input(event: InputEvent) -> void:
 			_bg_dots.trigger_pulse(0.65)
 		_try_hit()
 
+# ══════════════════════════════════════════════════════════════════════
+#  판정 : 각도-ms 이중 판정 (관대한 쪽 채택)
+# ══════════════════════════════════════════════════════════════════════
+func _angular_speed() -> float:
+	# rad/sec. BPM 상수 (회전량 무관하게 동일).
+	if pair == null or pair.beat_time <= 0.001 or pair.rotation_delta <= 0.001:
+		return PI * _bpm / 60.0
+	return pair.rotation_delta / pair.beat_time
+
+func _to_deg(seconds: float) -> float:
+	return seconds * _angular_speed() * 180.0 / PI
+
+# Late! 판정 상한(초). 60° or 40ms 중 큰 쪽.
+func _late_bound_seconds() -> float:
+	var from_deg: float = deg_to_rad(T_LATE_DEG) / _angular_speed()
+	return maxf(T_LATE_MS, from_deg)
+
+func _judge(diff: float) -> int:
+	var abs_d: float   = absf(diff)
+	var abs_deg: float = _to_deg(abs_d)
+
+	if abs_d <= T_PERFECT_MS or abs_deg <= T_PERFECT_DEG:
+		return J.PERFECT
+	if abs_d <= T_LPERFECT_MS or abs_deg <= T_LPERFECT_DEG:
+		return J.E_PERFECT if diff < 0 else J.L_PERFECT
+	if abs_d <= T_LATE_MS or abs_deg <= T_LATE_DEG:
+		return J.EARLY if diff < 0 else J.LATE
+	return J.EARLY_2 if diff < 0 else J.LATE_2
+
 func _try_hit() -> void:
 	if not running:
 		return
-	var diff: float     = pair.elapsed - pair.beat_time
-	# 자동 미스 직후 다음 회전으로 넘어간 상황에서 늦은 입력이 이중 진행을 일으키지 않도록,
-	# 판정창 밖의 극단적 조기 입력은 무시.
-	if diff < -T_BAD:
+	var diff: float = pair.elapsed - pair.beat_time
+	# 극단적 조기 입력(연타 오작동) 방어 : -0.5s 이하 무시
+	if diff < -0.5:
 		return
-	var abs_diff: float = absf(diff)
+	_apply_judgment(_judge(diff))
 
-	if abs_diff <= T_PERFECT:
-		_hit("PERFECT!", 300, Color(1.00, 0.40, 0.80))
-		perfect_count += 1
-		_trigger_flash(Color.WHITE, 0.10 * _diff_mult)
-		_landing_cam_impulse(1.0)
-		if _bg_dots != null:
-			_bg_dots.trigger_pulse(1.0)
-	elif abs_diff <= T_GOOD:
-		_hit("GOOD", 100, Color(0.35, 0.85, 1.00))
-		good_count += 1
-		_trigger_flash(Color.WHITE, 0.06 * _diff_mult)
-		_landing_cam_impulse(0.7)
-		if _bg_dots != null:
-			_bg_dots.trigger_pulse(0.8)
-	elif abs_diff <= T_BAD:
-		_hit("BAD", 30, Color.ORANGE)
-		bad_count += 1
-		_trigger_flash(Color.WHITE, 0.04 * _diff_mult)
-		_landing_cam_impulse(0.4)
+# ══════════════════════════════════════════════════════════════════════
+#  판정 적용 / 각 판정별 처리
+# ══════════════════════════════════════════════════════════════════════
+func _apply_judgment(j: int) -> void:
+	match j:
+		J.PERFECT:
+			_register_landed("정확", 300, COL_PERFECT, true)
+			perfect_count += 1
+		J.E_PERFECT:
+			_register_landed("빠름", 250, COL_E_PERFECT, false)
+			e_perfect_count += 1
+		J.L_PERFECT:
+			_register_landed("느림", 250, COL_L_PERFECT, false)
+			l_perfect_count += 1
+		J.EARLY:
+			_register_landed("빠름!", 150, COL_EARLY, false)
+			early_count += 1
+		J.LATE:
+			_register_landed("느림!", 150, COL_LATE, false)
+			late_count += 1
+		J.EARLY_2:
+			_register_early2()
+		J.LATE_2:
+			if FAILURE_PREVENTION:
+				_register_miss()
+			else:
+				_register_miss()  # 프로토타입 : 실패 방지 항상 ON
+
+# ── 착지 성공 (정확 ~ 느림!) ──
+func _register_landed(text: String, pts: int, color: Color, is_perfect: bool) -> void:
+	score += pts
+	if is_perfect:
+		combo += 1
 	else:
-		_register_miss()
-	_advance()
-
-func _hit(text: String, pts: int, color: Color) -> void:
-	combo     += 1
-	max_combo  = maxi(max_combo, combo)
-	score     += pts + combo * 10
+		combo = 0
+	max_combo = maxi(max_combo, combo)
 	pair.trigger_landing_pulse()
 	_show_judgment(text, color)
-	_update_ui()
 
+	var flash_a: float = 0.10 if is_perfect else 0.05
+	_trigger_flash(Color.WHITE, flash_a * _diff_mult)
+	_landing_cam_impulse(1.0 if is_perfect else 0.6)
+	if _bg_dots != null:
+		_bg_dots.trigger_pulse(1.0 if is_perfect else 0.75)
+
+	_update_ui()
+	_advance()
+
+# ── 빠름!! : 착지 실패, 회전 유지, 과부하 게이지 채움 ──
+func _register_early2() -> void:
+	combo = 0
+	early2_count += 1
+	_show_judgment("빠름!!", COL_EARLY_2)
+	_trigger_flash(Color.WHITE, 0.08 * _diff_mult)
+	_shake_intensity = 4.0 * _diff_mult
+	_shake_time      = 0.18
+	_add_overload(OVERLOAD_ADD_E2)
+	_update_ui()
+	# 주의 : _advance() 호출 없음. 회전은 계속 이어짐.
+
+# ── Late!! → 실패 방지 ON 시 놓침... 처리 ──
 func _register_miss() -> void:
 	combo = 0
 	miss_count += 1
-	_show_judgment("MISS", Color(1, 0.35, 0.35))
-	_update_ui()
-	# 미스 : 흰 플래시 + 강한 셰이크 (난이도 스케일)
-	_trigger_flash(Color.WHITE, 0.08 * _diff_mult)
+	var text: String = "놓침..." if FAILURE_PREVENTION else "느림!!"
+	var col: Color   = COL_MISS   if FAILURE_PREVENTION else COL_LATE_2
+	_show_judgment(text, col)
+	_trigger_flash(Color.WHITE, 0.10 * _diff_mult)
 	_shake_intensity = 6.0 * _diff_mult
 	_shake_time      = 0.28
-	# 회전 임펄스도 더 강하게
 	if _difficulty >= 2:
-		_rot_target = randf_range(-1, 1) * 0.06 * _diff_mult
+		_rot_target = randf_range(-1, 1) * 0.055 * _diff_mult
 		_rot_time   = CAM_IMPULSE_DUR
+	_add_overload(OVERLOAD_ADD_MISS)
+	_update_ui()
+	_advance()
 
-# ── 착지 시 카메라 임펄스 (난이도별 확장) ──
-# strength = 판정에 따른 세기 배수 (PERFECT=1.0, GOOD=0.7, BAD=0.4)
+# ── 과부하 게이지 관리 ──
+func _add_overload(amount: float) -> void:
+	overload_gauge += amount
+	_update_overload_ui()
+	if overload_gauge >= OVERLOAD_MAX:
+		_trigger_overload()
+
+func _trigger_overload() -> void:
+	overload_gauge = 0.0
+	overload_count += 1
+	_show_judgment("과부하...", COL_OVERLOAD)
+	_trigger_flash(Color.WHITE, 0.22 * _diff_mult)
+	_shake_intensity = 10.0 * _diff_mult
+	_shake_time      = 0.40
+	_rot_target = randf_range(-1, 1) * 0.08 * _diff_mult
+	_rot_time   = CAM_IMPULSE_DUR * 1.2
+	_update_overload_ui()
+	# 실패 방지 ON : 게이지 리셋 후 진행 지속. 게임오버 없음.
+
+# ══════════════════════════════════════════════════════════════════════
+#  카메라 임펄스 (난이도별)
+# ══════════════════════════════════════════════════════════════════════
 func _landing_cam_impulse(strength: float) -> void:
 	if _difficulty <= 1:
 		return
-	# 난이도 2+ : 짧은 셰이크
 	_shake_intensity = 2.2 * float(_difficulty - 1) * strength
 	_shake_time      = 0.12
-	# 난이도 3+ : 회전 임펄스
 	if _difficulty >= 3:
 		var mag: float = 0.032 * float(_difficulty - 2) * strength
 		_rot_target = randf_range(-1, 1) * mag
 		_rot_time   = CAM_IMPULSE_DUR
-	# 난이도 4+ : 줌 임펄스 (살짝 확대)
 	if _difficulty >= 4:
 		_zoom_target = 1.0 + 0.025 * float(_difficulty - 3) * strength
 		_zoom_time   = CAM_IMPULSE_DUR
 
-# ── 다음 타일로 진행 ──
+# ══════════════════════════════════════════════════════════════════════
+#  진행 / 다음 회전
+# ══════════════════════════════════════════════════════════════════════
 func _advance() -> void:
 	pivot_idx += 1
 	pair.swap_roles()
@@ -355,7 +525,9 @@ func _start_next_rotation() -> void:
 	running = true
 	_update_ui()
 
-# ── 클리어 → 폭발 이펙트 ──
+# ══════════════════════════════════════════════════════════════════════
+#  클리어
+# ══════════════════════════════════════════════════════════════════════
 func _game_clear() -> void:
 	running = false
 	_cleared = true
@@ -363,33 +535,39 @@ func _game_clear() -> void:
 
 	track.set_current(track.tiles.size() - 1)
 
-	# 마지막 타일 좌표에서 폭발 (swap_roles 후이므로 role은 신뢰 X)
 	var end_pos: Vector2 = track.tiles[track.tiles.size() - 1]
-	# 난이도별 폭발 규모
-	var gold_count: int = int(120.0 * _diff_mult)
+	var gold_count: int  = int(120.0 * _diff_mult)
 	var white_count: int = int(40.0 * _diff_mult)
 	_spawn_explosion(end_pos, Color(1.00, 0.85, 0.30), gold_count)
 	_spawn_explosion(end_pos, Color(1.0, 1.0, 1.0), white_count)
-	# 고난이도는 추가로 컬러 스파크 (핑크/시안)
 	if _difficulty >= 3:
 		_spawn_explosion(end_pos, Color(1.0, 0.4, 0.9), int(50 * _diff_mult))
 	if _difficulty >= 4:
 		_spawn_explosion(end_pos, Color(0.4, 0.9, 1.0), int(50 * _diff_mult))
-	# 카메라 셰이크 (난이도 스케일)
 	_shake_intensity = 12.0 * _diff_mult
 	_shake_time      = 0.5 + _diff_mult * 0.1
-	# 회전 임펄스 강하게
 	_rot_target = randf_range(-1, 1) * 0.08 * _diff_mult
 	_rot_time   = CAM_IMPULSE_DUR * 1.4
-	# 화면 플래시 (클리어는 좀 더 크게)
 	_trigger_flash(Color.WHITE, 0.28 * _diff_mult)
 	if _bg_dots != null:
 		_bg_dots.trigger_pulse(1.0)
 
-	_judgment_lbl.text = "★  CLEAR  ★\n\nSCORE  %d   MAX COMBO  %d\nP:%d  G:%d  B:%d  M:%d\n\nENTER / SPACE 로 메뉴" % [
-		score, max_combo, perfect_count, good_count, bad_count, miss_count
+	var pure: bool = _is_pure_perfect()
+	var title: String = "★  PURE PERFECT!  ★" if pure else "★  CLEAR  ★"
+
+	# 결과 화면용으로 라벨 크기·폰트 축소
+	var vp: Vector2 = get_viewport_rect().size
+	_judgment_lbl.size     = Vector2(vp.x, vp.y * 0.75)
+	_judgment_lbl.position = Vector2(0, vp.y * 0.12)
+	_judgment_lbl.add_theme_font_size_override("font_size", 26)
+
+	_judgment_lbl.text = "%s\n\nSCORE  %d    MAX COMBO  %d    ACC  %.2f%%\n\n정확 %d   빠름 %d   느림 %d\n빠름! %d   느림! %d   빠름!! %d\n놓침 %d   과부하 %d\n\nENTER / SPACE 로 메뉴" % [
+		title, score, max_combo, _get_accuracy(),
+		perfect_count, e_perfect_count, l_perfect_count,
+		early_count, late_count, early2_count,
+		miss_count, overload_count
 	]
-	_judgment_lbl.modulate = Color.GOLD
+	_judgment_lbl.modulate = COL_PERFECT if pure else Color.GOLD
 	_j_timer = 99999.0
 
 func _spawn_explosion(pos: Vector2, color: Color, amount: int) -> void:
@@ -411,16 +589,15 @@ func _spawn_explosion(pos: Vector2, color: Color, amount: int) -> void:
 	p.damping_min             = 40.0
 	p.damping_max             = 120.0
 	add_child(p)
-	# 파티클 수명 지나면 자동 삭제
 	var t := get_tree().create_timer(3.0)
 	t.timeout.connect(p.queue_free)
 
-# ── 이펙트 헬퍼 ──
-# 색상 인자는 하위 호환용 (실제 오버레이는 항상 흰색)
+# ══════════════════════════════════════════════════════════════════════
+#  UI 헬퍼
+# ══════════════════════════════════════════════════════════════════════
 func _trigger_flash(_color: Color, alpha: float) -> void:
 	_flash_alpha = maxf(_flash_alpha, alpha)
 
-# ── UI ──
 func _show_judgment(text: String, color: Color) -> void:
 	if _cleared:
 		return
@@ -428,8 +605,34 @@ func _show_judgment(text: String, color: Color) -> void:
 	_judgment_lbl.modulate = color
 	_j_timer = 0.35
 
+func _get_accuracy() -> float:
+	var total: int = maxi(pivot_idx, 1)
+	var landed_perfect: int = perfect_count + e_perfect_count + l_perfect_count
+	return float(perfect_count) * 0.01 + float(landed_perfect) * 100.0 / float(total)
+
+func _is_pure_perfect() -> bool:
+	# 모든 진행된 타일이 정확 판정이어야 함
+	return perfect_count > 0 and perfect_count == pivot_idx and \
+		e_perfect_count == 0 and l_perfect_count == 0 and \
+		early_count == 0 and late_count == 0 and \
+		early2_count == 0 and miss_count == 0 and overload_count == 0
+
+func _update_overload_ui() -> void:
+	if _ov_fill == null:
+		return
+	var pct: float = clampf(overload_gauge / OVERLOAD_MAX, 0.0, 1.0)
+	_ov_fill.size = Vector2(OV_BAR_W * pct, OV_BAR_H)
+	# 색상 : 낮음(초록) → 중간(주황) → 높음(빨강)
+	if pct < 0.5:
+		var t: float = pct / 0.5
+		_ov_fill.color = Color(1.0, 0.55 + t * 0.15, 0.35 - t * 0.15)
+	else:
+		var t: float = (pct - 0.5) / 0.5
+		_ov_fill.color = Color(1.0, 0.70 - t * 0.55, 0.20)
+
 func _update_ui() -> void:
 	_score_lbl.text = "SCORE  %d" % score
 	_combo_lbl.text = "%d COMBO" % combo if combo >= 2 else ""
 	if track != null:
 		_tile_info_lbl.text = "TILE  %d / %d" % [pivot_idx + 1, track.tiles.size()]
+	_acc_lbl.text = "ACC   %.2f%%" % _get_accuracy() if pivot_idx > 0 else "ACC   ---"
