@@ -1,14 +1,14 @@
 class_name BackgroundDots
 extends Node2D
 
-# ── 스크린 좌표 기반 땡땡이 무늬 배경 ──
+# ── 스크린 좌표 기반 45° 회전 폴카닷 배경 ──
 # CanvasLayer(layer=-1) 안에 배치 → 게임 월드 뒤에 렌더
 
-const SPACING: float = 62.0    # 도트 간격
-const R_BASE: float  = 2.4     # 기본 반지름
-const R_ADD: float   = 2.6     # 펄스 시 확장량
-const A_BASE: float  = 0.045   # 평상시 알파 (아주 흐림)
-const A_PEAK: float  = 0.28    # 펄스 피크 알파
+const SPACING: float = 66.0     # 도트 간격 (diagonal 축 기준)
+const R_BASE: float  = 3.4      # 기본 반지름 (확대)
+const R_ADD: float   = 3.0      # 펄스 시 확장량
+const A_BASE: float  = 0.05     # 평상시 알파
+const A_PEAK: float  = 0.30     # 펄스 피크 알파
 
 var viewport_size: Vector2 = Vector2(1152, 648)
 var _pulse: float = 0.0
@@ -28,15 +28,22 @@ func _draw() -> void:
 	var r: float = R_BASE + _pulse * R_ADD
 	var col := Color(1.0, 1.0, 1.0, a)
 
-	var cols: int = int(viewport_size.x / SPACING) + 3
-	var rows: int = int(viewport_size.y / SPACING) + 3
-	var off_x: float = fmod(viewport_size.x, SPACING) * 0.5
-	var off_y: float = fmod(viewport_size.y, SPACING) * 0.5
+	# 45° 회전 격자 축 (다이아몬드 배치)
+	const ROOT2_HALF: float = 0.7071067811865476
+	var s: float = SPACING
+	var ax: Vector2 = Vector2(s * ROOT2_HALF,  s * ROOT2_HALF)
+	var ay: Vector2 = Vector2(-s * ROOT2_HALF, s * ROOT2_HALF)
 
-	# 짝수·홀수 행 교차 오프셋으로 폴카닷 패턴 (마름모 격자)
-	for j in rows:
-		var y: float = off_y + float(j) * SPACING
-		var x_shift: float = SPACING * 0.5 if (j % 2 == 1) else 0.0
-		for i in cols:
-			var x: float = off_x + float(i) * SPACING + x_shift
-			draw_circle(Vector2(x, y), r, col)
+	# 뷰포트 대각선을 덮을 만큼의 격자 범위
+	var half_diag: float = viewport_size.length() * 0.5 + SPACING
+	var reach: int = int(half_diag / SPACING) + 2
+	var center: Vector2 = viewport_size * 0.5
+
+	for j in range(-reach, reach + 1):
+		for i in range(-reach, reach + 1):
+			var pos: Vector2 = center + ax * float(i) + ay * float(j)
+			# 뷰포트 밖은 스킵 (약간의 여유)
+			if pos.x < -SPACING or pos.x > viewport_size.x + SPACING \
+			or pos.y < -SPACING or pos.y > viewport_size.y + SPACING:
+				continue
+			draw_circle(pos, r, col)
