@@ -25,8 +25,6 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, r, base)
 	# 흰 테두리
 	draw_arc(Vector2.ZERO, r, 0.0, TAU, 64, Color(1, 1, 1, 0.9), 2.5, true)
-	# 하이라이트
-	draw_circle(Vector2(-r * 0.35, -r * 0.35), r * 0.32, Color(1, 1, 1, 0.60))
 	# 펄스 시 순간 확산 링
 	if pulse > 0.01:
 		draw_arc(Vector2.ZERO, r + pulse * 22.0, 0.0, TAU, 64,

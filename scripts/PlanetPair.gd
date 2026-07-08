@@ -20,6 +20,7 @@ var running: bool = false
 # 잔상 (오래된 것 = 배열 앞, 최신 = 배열 뒤)
 var _fire_trail: Array[Vector2] = []
 var _ice_trail: Array[Vector2] = []
+var _time: float = 0.0
 
 func _ready() -> void:
 	fire = Planet.new()
@@ -61,6 +62,7 @@ func stop() -> void:
 func _process(delta: float) -> void:
 	if not running:
 		return
+	_time += delta
 	elapsed += delta
 	var t: float = clampf(elapsed / beat_time, 0.0, 1.0)
 	var current_angle: float = start_angle + rotation_delta * t
@@ -98,15 +100,28 @@ func _draw() -> void:
 	draw_arc(pivot_pos, ARM_LENGTH, 0.0, TAU, 80, Color(1, 1, 1, 0.18), 2.2, true)
 	draw_arc(pivot_pos, ARM_LENGTH, 0.0, TAU, 80, Color(1, 1, 1, 0.06), 8.0, true)
 
-	# 잔상 : 오래된 것부터 그리기(뒤에 최신)
-	var fire_col: Color = Color(1.00, 0.35, 0.10)
-	var ice_col: Color  = Color(0.30, 0.72, 1.00)
+	# 잔상 : 3층 불꽃 그라데이션 (외곽 짙은 → 중간 → 밝은 코어) + 플리커
+	# 오래된 것부터 그려 최신 잔상이 앞에 오도록
 	for i in TRAIL_LEN:
-		var age: float   = 1.0 - float(i) / float(TRAIL_LEN - 1)   # 0=newest, 1=oldest
-		var alpha: float = pow(1.0 - age, 1.6) * 0.55
-		var r_scale: float = 1.0 - age * 0.55
-		draw_circle(_fire_trail[i], fire.radius * r_scale * 0.85, Color(fire_col.r, fire_col.g, fire_col.b, alpha))
-		draw_circle(_ice_trail[i],  ice.radius  * r_scale * 0.85, Color(ice_col.r,  ice_col.g,  ice_col.b,  alpha))
+		var life: float = float(i) / float(TRAIL_LEN - 1)   # 0=oldest, 1=newest
+		var flicker: float = 0.80 + sin(_time * 12.0 + float(i) * 1.7) * 0.20
+		var life2: float = life * life                       # 급격한 페이드
+
+		# --- Fire trail : 짙은 붉음 → 오렌지 → 노랑 코어 ---
+		var f_pos: Vector2 = _fire_trail[i]
+		var f_r: float = fire.radius * life * 0.95 * flicker
+		draw_circle(f_pos, f_r * 1.55, Color(0.90, 0.13, 0.04, life2 * 0.45))    # 외곽 옅은 진홍
+		draw_circle(f_pos, f_r * 1.00, Color(1.00, 0.42, 0.10, life * 0.65))     # 중간 오렌지
+		draw_circle(f_pos, f_r * 0.55, Color(1.00, 0.88, 0.50, life * 0.78))     # 밝은 노랑
+		draw_circle(f_pos, f_r * 0.25, Color(1.00, 0.98, 0.85, life * 0.85))     # 흰빛 코어
+
+		# --- Ice trail : 짙은 파랑 → 시안 → 백청 코어 (푸른 불꽃) ---
+		var i_pos: Vector2 = _ice_trail[i]
+		var i_r: float = ice.radius * life * 0.95 * flicker
+		draw_circle(i_pos, i_r * 1.55, Color(0.05, 0.20, 0.85, life2 * 0.45))    # 외곽 짙은 파랑
+		draw_circle(i_pos, i_r * 1.00, Color(0.20, 0.65, 1.00, life * 0.65))     # 중간 시안
+		draw_circle(i_pos, i_r * 0.55, Color(0.75, 0.92, 1.00, life * 0.78))     # 밝은 백청
+		draw_circle(i_pos, i_r * 0.25, Color(0.95, 0.98, 1.00, life * 0.85))     # 흰빛 코어
 
 func trigger_landing_pulse() -> void:
 	if fire_is_pivot:
