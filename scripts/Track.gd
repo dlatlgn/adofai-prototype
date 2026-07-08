@@ -50,42 +50,49 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	# 1. 지나온 관절 뒤에 흰빛 글로우 (관절보다 먼저 → 뒤에 렌더)
+	# 1. 지나온 관절 뒤에 흰빛 3중 글로우 (넓은 헤일로 + 중간 링 + 밝은 코어)
 	for i in range(current_tile):
 		var dist: int = current_tile - i
-		var glow_a: float = maxf(0.05, 0.40 - dist * 0.025)
-		# 넓은 옅은 링 + 좁은 밝은 링 (이중 글로우)
-		draw_circle(tiles[i], JOINT_R + 10.0, Color(1, 1, 1, glow_a * 0.28))
-		draw_circle(tiles[i], JOINT_R + 4.0, Color(1, 1, 1, glow_a * 0.45))
+		var glow_a: float = maxf(0.08, 0.50 - dist * 0.022)
+		draw_circle(tiles[i], JOINT_R + 22.0, Color(1, 1, 1, glow_a * 0.10))  # 외곽 헤일로
+		draw_circle(tiles[i], JOINT_R + 12.0, Color(1, 1, 1, glow_a * 0.22))  # 중간 링
+		draw_circle(tiles[i], JOINT_R + 5.0, Color(1, 1, 1, glow_a * 0.42))   # 밝은 코어
 
-	# 2. 도로 리본
+	# 2. 지나온 도로 뒤에 얇은 흰빛 라인 (지속 트레일감)
+	for i in range(current_tile):
+		if i + 1 < tiles.size():
+			var d: int = current_tile - i
+			var line_a: float = maxf(0.04, 0.28 - d * 0.02)
+			draw_line(tiles[i], tiles[i + 1], Color(1, 1, 1, line_a), ROAD_WIDTH + 8.0, true)
+
+	# 3. 도로 리본
 	for i in range(tiles.size() - 1):
 		draw_line(tiles[i], tiles[i + 1], _road_color(i), ROAD_WIDTH, true)
 
-	# 3. 관절 (둥근 이음매)
+	# 4. 관절 (둥근 이음매)
 	for i in tiles.size():
 		draw_circle(tiles[i], JOINT_R, _joint_color(i))
 
-	# 4. 소도트 (박자 마커)
+	# 5. 소도트 (박자 마커)
 	for i in tiles.size():
 		var col: Color = _dot_color(i)
 		if col.a > 0.0:
 			draw_circle(tiles[i], 4.5, col)
 
-	# 5. 현재 피벗 강조 (노란 원 + 회전 링)
+	# 6. 현재 피벗 강조 (노란 원 + 회전 링)
 	if current_tile >= 0 and current_tile < tiles.size():
 		var p: Vector2 = tiles[current_tile]
 		var pulse_r: float = JOINT_R + 4.0 + sin(_time * 6.0) * 3.0
 		draw_circle(p, JOINT_R - 6.0, Color(1.00, 0.87, 0.30))
 		draw_arc(p, pulse_r, 0.0, TAU, 64, Color(1.00, 0.95, 0.55), 3.2, true)
 
-	# 6. 다음 착지 타일 (보라)
+	# 7. 다음 착지 타일 (보라)
 	if current_tile + 1 < tiles.size():
 		var p: Vector2 = tiles[current_tile + 1]
 		draw_arc(p, JOINT_R + 3.0, 0.0, TAU, 64, Color(0.95, 0.50, 1.00), 3.0, true)
 		draw_circle(p, 8.0, Color(0.95, 0.50, 1.00, 0.9))
 
-	# 7. 착지 순간 확장 링
+	# 8. 착지 순간 확장 링
 	for f in _flashes:
 		var a: float = f["age"] as float
 		var t: float = a / 0.75
@@ -94,7 +101,7 @@ func _draw() -> void:
 		var w: float = 5.0 * (1.0 - t) + 1.0
 		draw_arc(f["pos"], r, 0.0, TAU, 56, Color(1.0, 0.95, 0.55, alpha), w, true)
 
-	# 8. 결승선 마커 (마지막 타일)
+	# 9. 결승선 마커 (마지막 타일)
 	if tiles.size() >= 2:
 		var final: Vector2 = tiles[tiles.size() - 1]
 		var is_at_end: bool = current_tile >= tiles.size() - 1
