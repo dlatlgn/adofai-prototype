@@ -50,20 +50,26 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	# 1. 지나온 관절 뒤에 흰빛 3중 글로우 (넓은 헤일로 + 중간 링 + 밝은 코어)
+	# 1. 지나온 관절 뒤에 8층 그라데이션 흰빛 글로우
+	#    최대 반경 JOINT_R + 66 ≈ 98px > TILE_DIST(90) → 인접 타일 글로우 오버랩 → 동화
 	for i in range(current_tile):
+		var pos: Vector2 = tiles[i]
 		var dist: int = current_tile - i
-		var glow_a: float = maxf(0.08, 0.50 - dist * 0.022)
-		draw_circle(tiles[i], JOINT_R + 22.0, Color(1, 1, 1, glow_a * 0.10))  # 외곽 헤일로
-		draw_circle(tiles[i], JOINT_R + 12.0, Color(1, 1, 1, glow_a * 0.22))  # 중간 링
-		draw_circle(tiles[i], JOINT_R + 5.0, Color(1, 1, 1, glow_a * 0.42))   # 밝은 코어
+		var glow_base: float = maxf(0.10, 0.60 - dist * 0.018)
+		for layer_i in range(8):
+			var t: float = float(layer_i) / 7.0     # 0(중심) → 1(외곽)
+			var r: float = JOINT_R + 2.0 + t * 64.0
+			var falloff: float = pow(1.0 - t, 1.7)   # 부드러운 감쇠
+			var alpha: float = glow_base * falloff * 0.30
+			draw_circle(pos, r, Color(1, 1, 1, alpha))
 
-	# 2. 지나온 도로 뒤에 얇은 흰빛 라인 (지속 트레일감)
+	# 2. 지나온 도로 뒤에 넓은 흰빛 이중 트레일 (인접 타일 글로우와 이어짐)
 	for i in range(current_tile):
 		if i + 1 < tiles.size():
 			var d: int = current_tile - i
-			var line_a: float = maxf(0.04, 0.28 - d * 0.02)
-			draw_line(tiles[i], tiles[i + 1], Color(1, 1, 1, line_a), ROAD_WIDTH + 8.0, true)
+			var base_a: float = maxf(0.06, 0.35 - d * 0.018)
+			draw_line(tiles[i], tiles[i + 1], Color(1, 1, 1, base_a * 0.28), ROAD_WIDTH + 28.0, true)
+			draw_line(tiles[i], tiles[i + 1], Color(1, 1, 1, base_a * 0.50), ROAD_WIDTH + 14.0, true)
 
 	# 3. 도로 리본
 	for i in range(tiles.size() - 1):
