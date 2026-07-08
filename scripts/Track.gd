@@ -5,7 +5,19 @@ const TILE_DIST: float  = 90.0
 const ROAD_WIDTH: float = 56.0
 const JOINT_R: float    = ROAD_WIDTH * 0.58   # 관절 원 (도로보다 살짝 넓게 → 각진 이음매 커버)
 
+# ── 발판 종류 ──
+const T_NORMAL: int     = 0
+const T_SPEED_UP: int   = 1   # BPM × 1.5 (초록)
+const T_SPEED_DOWN: int = 2   # BPM ÷ 1.5 (빨강)
+const T_TWIRL: int      = 3   # 회전 방향 반전 (시안)
+
+# 발판 색상
+const COL_SPEED_UP: Color   = Color(0.35, 1.00, 0.45)
+const COL_SPEED_DOWN: Color = Color(1.00, 0.40, 0.45)
+const COL_TWIRL: Color      = Color(0.35, 1.00, 1.00)
+
 var tiles: Array[Vector2] = []
+var tile_types: Array[int] = []
 var current_tile: int = 0
 
 # 착지 잔광 : 최근 착지한 타일 위치의 확산 링
@@ -14,12 +26,29 @@ var _time: float = 0.0
 
 func build_from_directions(path_dirs: Array) -> void:
 	tiles.clear()
+	tile_types.clear()
 	tiles.append(Vector2.ZERO)
+	tile_types.append(T_NORMAL)
 	for v in path_dirs:
 		var d: float = float(v)
 		var prev: Vector2 = tiles[tiles.size() - 1]
 		tiles.append(prev + Vector2.RIGHT.rotated(d) * TILE_DIST)
+		tile_types.append(T_NORMAL)
 	queue_redraw()
+
+# specials : { tile_index: type_int } 사전으로 특수 발판 지정
+func set_specials(specials: Dictionary) -> void:
+	for k in specials.keys():
+		var idx: int = int(k)
+		var t: int = int(specials[k])
+		if idx >= 0 and idx < tile_types.size():
+			tile_types[idx] = t
+	queue_redraw()
+
+func type_at(idx: int) -> int:
+	if idx < 0 or idx >= tile_types.size():
+		return T_NORMAL
+	return tile_types[idx]
 
 func set_current(idx: int) -> void:
 	# idx가 진행되면 새 타일에 착지한 것 → 확장 링 스폰
@@ -98,6 +127,13 @@ func _draw() -> void:
 		draw_arc(p, JOINT_R + 3.0, 0.0, TAU, 64, Color(0.95, 0.50, 1.00), 3.0, true)
 		draw_circle(p, 8.0, Color(0.95, 0.50, 1.00, 0.9))
 
+	# 7.5 특수 발판 시각화 (외곽 컬러 링 + 아이콘)
+	for i in tile_types.size():
+		var t: int = tile_types[i]
+		if t == T_NORMAL:
+			continue
+		_draw_special(i, t)
+
 	# 8. 착지 순간 확장 링
 	for f in _flashes:
 		var a: float = f["age"] as float
@@ -157,3 +193,46 @@ func _dot_color(i: int) -> Color:
 		return Color(0, 0, 0, 0)  # 관절 자체가 이미 흰빛 → 도트 생략
 	else:
 		return Color(1, 1, 1, 0.40)
+
+# ── 특수 발판 렌더 : 컬러 링 + 심볼 ──
+func _draw_special(idx: int, t: int) -> void:
+	var pos: Vector2 = tiles[idx]
+	var col: Color
+	match t:
+		T_SPEED_UP:   col = COL_SPEED_UP
+		T_SPEED_DOWN: col = COL_SPEED_DOWN
+		T_TWIRL:      col = COL_TWIRL
+		_: return
+
+	# 은은한 맥동
+	var pulse: float = 1.0 + sin(_time * 3.5 + float(idx) * 0.4) * 0.08
+	var ring_r: float = (JOINT_R + 11.0) * pulse
+
+	# 외곽 컬러 링 (2겹)
+	draw_arc(pos, ring_r,       0.0, TAU, 56, Color(col.r, col.g, col.b, 0.95), 3.4, true)
+	draw_arc(pos, ring_r + 5.0, 0.0, TAU, 56, Color(col.r, col.g, col.b, 0.35), 1.6, true)
+
+	# 심볼
+	match t:
+		T_SPEED_UP:
+			# 오른쪽 화살표 두 개 >>
+			_draw_chevron(pos + Vector2(-9, 0), Vector2.RIGHT, col, 6.0)
+			_draw_chevron(pos + Vector2( 3, 0), Vector2.RIGHT, col, 6.0)
+		T_SPEED_DOWN:
+			# 왼쪽 화살표 두 개 <<
+			_draw_chevron(pos + Vector2( 9, 0), Vector2.LEFT, col, 6.0)
+			_draw_chevron(pos + Vector2(-3, 0), Vector2.LEFT, col, 6.0)
+		T_TWIRL:
+			# 원형 회살표 (아크 + 화살촉)
+			var r_ic: float = JOINT_R * 0.42
+			draw_arc(pos, r_ic, 0.5, TAU - 0.25, 32, col, 2.8, true)
+			var tip: Vector2 = pos + Vector2.RIGHT.rotated(0.5) * r_ic
+			draw_line(tip, tip + Vector2(-5, -6).rotated(0.5), col, 2.4, true)
+			draw_line(tip, tip + Vector2( 4, -3).rotated(0.5), col, 2.4, true)
+
+func _draw_chevron(pos: Vector2, dir: Vector2, col: Color, size: float) -> void:
+	# > 모양 : 두 개의 대각선
+	var f: Vector2 = dir.normalized() * size
+	var s: Vector2 = Vector2(-f.y, f.x) * 0.6   # 수직 성분
+	draw_line(pos - f - s, pos + f, col, 2.6, true)
+	draw_line(pos + f, pos - f + s, col, 2.6, true)

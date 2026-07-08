@@ -33,12 +33,17 @@ func _ready() -> void:
 	_update_positions(start_angle)
 	_reset_trails()
 
-func start_rotation(new_pivot: Vector2, from_angle: float, to_angle: float, duration: float) -> void:
+func start_rotation(new_pivot: Vector2, from_angle: float, to_angle: float, duration: float, direction: int = 1) -> void:
 	pivot_pos   = new_pivot
 	start_angle = from_angle
+	# direction : 1 = CCW(양수 회전), -1 = CW(음수 회전)
 	var delta: float = to_angle - from_angle
-	while delta <= 0.001:
-		delta += TAU
+	if direction > 0:
+		while delta <= 0.001:
+			delta += TAU
+	else:
+		while delta >= -0.001:
+			delta -= TAU
 	rotation_delta = delta
 	beat_time      = duration
 	elapsed        = 0.0

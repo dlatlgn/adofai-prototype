@@ -131,6 +131,11 @@ var _beat_time: float = 0.5
 var _difficulty: int = 1
 var _diff_mult: float = 1.0
 
+# 특수 발판 상태
+var _bpm_mult: float = 1.0     # 누적 BPM 배수 (SPEED_UP/DOWN)
+var _rot_dir: int = 1          # 1 = CCW, -1 = CW (TWIRL로 반전)
+var _effect_lbl: Label
+
 # ══════════════════════════════════════════════════════════════════════
 #  초기화
 # ══════════════════════════════════════════════════════════════════════
@@ -159,6 +164,9 @@ func _ready() -> void:
 	track = Track.new()
 	track.name = "Track"
 	track.build_from_directions(_stage["path"])
+	# 특수 발판 지정 (있다면)
+	if _stage.has("specials"):
+		track.set_specials(_stage["specials"])
 	add_child(track)
 
 	# 판정 팝업 : PlanetPair보다 먼저 add → Z-order에서 공 뒤에 렌더
@@ -198,6 +206,10 @@ func _ready() -> void:
 	_stage_lbl.text = "STAGE  %d.  %s   BPM %d" % [
 		StageData.current_index + 1, _stage["name"], int(_bpm)
 	]
+
+	# 특수 발판 효과 HUD (BPM 배수 + 회전 방향)
+	_effect_lbl = _mk_label(ui, Vector2(24, 178), 16, Color(0.75, 0.90, 1.00))
+	_update_effect_ui()
 
 	_score_lbl     = _mk_label(ui, Vector2(24, 52), 30, Color.WHITE)
 	_combo_lbl     = _mk_label(ui, Vector2(24, 92), 42, Color.YELLOW)
@@ -351,10 +363,10 @@ func _input(event: InputEvent) -> void:
 #  판정 : 각도-ms 이중 판정 (관대한 쪽 채택)
 # ══════════════════════════════════════════════════════════════════════
 func _angular_speed() -> float:
-	# rad/sec. BPM 상수 (회전량 무관하게 동일).
-	if pair == null or pair.beat_time <= 0.001 or pair.rotation_delta <= 0.001:
-		return PI * _bpm / 60.0
-	return pair.rotation_delta / pair.beat_time
+	# rad/sec. CW 회전으로 rotation_delta가 음수여도 절댓값으로 계산.
+	if pair == null or pair.beat_time <= 0.001:
+		return PI * _bpm * _bpm_mult / 60.0
+	return absf(pair.rotation_delta) / pair.beat_time
 
 func _to_deg(seconds: float) -> float:
 	return seconds * _angular_speed() * 180.0 / PI
@@ -500,10 +512,38 @@ func _landing_cam_impulse(strength: float) -> void:
 func _advance() -> void:
 	pivot_idx += 1
 	pair.swap_roles()
+
+	# 새 피벗(방금 착지한 타일)의 특수 발판 효과 적용
+	_apply_tile_effect(pivot_idx)
+
 	if pivot_idx >= track.tiles.size() - 1:
 		_game_clear()
 		return
 	_start_next_rotation()
+
+# ── 특수 발판 효과 적용 ──
+func _apply_tile_effect(idx: int) -> void:
+	if track == null:
+		return
+	var t: int = track.type_at(idx)
+	match t:
+		Track.T_SPEED_UP:
+			_bpm_mult *= 1.5
+			_beat_time = 60.0 / (_bpm * _bpm_mult)
+			_trigger_flash(Color.WHITE, 0.12)
+			_show_judgment("SPEED UP", Track.COL_SPEED_UP)
+		Track.T_SPEED_DOWN:
+			_bpm_mult /= 1.5
+			_beat_time = 60.0 / (_bpm * _bpm_mult)
+			_trigger_flash(Color.WHITE, 0.12)
+			_show_judgment("SLOW", Track.COL_SPEED_DOWN)
+		Track.T_TWIRL:
+			_rot_dir *= -1
+			_trigger_flash(Color.WHITE, 0.14)
+			_show_judgment("TWIRL", Track.COL_TWIRL)
+		_:
+			return
+	_update_effect_ui()
 
 func _start_next_rotation() -> void:
 	var pivot_pos: Vector2 = track.tiles[pivot_idx]
@@ -521,12 +561,16 @@ func _start_next_rotation() -> void:
 	var end_angle: float = to_next.angle()
 
 	var delta: float = end_angle - start_angle
-	while delta <= 0.001:
-		delta += TAU
+	if _rot_dir > 0:
+		while delta <= 0.001:
+			delta += TAU
+	else:
+		while delta >= -0.001:
+			delta -= TAU
 
-	var duration: float = (delta / PI) * _beat_time
+	var duration: float = (absf(delta) / PI) * _beat_time
 
-	pair.start_rotation(pivot_pos, start_angle, end_angle, duration)
+	pair.start_rotation(pivot_pos, start_angle, end_angle, duration, _rot_dir)
 	running = true
 	_update_ui()
 
@@ -649,3 +693,10 @@ func _update_ui() -> void:
 	if track != null:
 		_tile_info_lbl.text = "TILE  %d / %d" % [pivot_idx + 1, track.tiles.size()]
 	_acc_lbl.text = "ACC   %.2f%%" % _get_accuracy() if pivot_idx > 0 else "ACC   ---"
+
+func _update_effect_ui() -> void:
+	if _effect_lbl == null:
+		return
+	var eff_bpm: float = _bpm * _bpm_mult
+	var dir_str: String = "CCW ↺" if _rot_dir > 0 else "CW ↻"
+	_effect_lbl.text = "×%.2f  BPM %d   |   %s" % [_bpm_mult, int(eff_bpm), dir_str]
