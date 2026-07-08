@@ -17,6 +17,7 @@ var _judgment_lbl: Label
 var _hint_lbl: Label
 var _tile_info_lbl: Label
 var _stage_lbl: Label
+var _flash_rect: ColorRect
 
 # ── 게임 상태 ──
 var pivot_idx: int = 0
@@ -32,7 +33,15 @@ var good_count: int = 0
 var bad_count: int = 0
 var miss_count: int = 0
 
-# 스테이지에서 로드
+# 화면 플래시
+var _flash_alpha: float = 0.0
+var _flash_color: Color = Color.WHITE
+
+# 카메라 셰이크
+var _shake_time: float = 0.0
+var _shake_intensity: float = 0.0
+
+# 스테이지 데이터
 var _stage: Dictionary
 var _bpm: float = 120.0
 var _beat_time: float = 0.5
@@ -40,10 +49,13 @@ var _beat_time: float = 0.5
 func _ready() -> void:
 	var vp: Vector2 = get_viewport_rect().size
 
-	# ── 스테이지 데이터 로드 ──
-	_stage      = StageData.current()
-	_bpm        = float(_stage["bpm"])
-	_beat_time  = 60.0 / _bpm
+	# ── 검은 배경 ──
+	RenderingServer.set_default_clear_color(Color.BLACK)
+
+	# ── 스테이지 로드 ──
+	_stage     = StageData.current()
+	_bpm       = float(_stage["bpm"])
+	_beat_time = 60.0 / _bpm
 
 	# ── Track ──
 	track = Track.new()
@@ -73,19 +85,26 @@ func _ready() -> void:
 	ui.name = "UI"
 	add_child(ui)
 
-	_stage_lbl     = _mk_label(ui, Vector2(24, 18), 22, Color(0.85, 0.85, 1.0))
+	# 화면 플래시 오버레이 (판정용)
+	_flash_rect = ColorRect.new()
+	_flash_rect.size = vp
+	_flash_rect.color = Color(1, 1, 1, 0)
+	_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_flash_rect)
+
+	_stage_lbl = _mk_label(ui, Vector2(24, 18), 22, Color(0.85, 0.85, 1.0))
 	_stage_lbl.text = "STAGE  %d.  %s   BPM %d" % [
 		StageData.current_index + 1, _stage["name"], int(_bpm)
 	]
 
 	_score_lbl     = _mk_label(ui, Vector2(24, 52), 30, Color.WHITE)
-	_combo_lbl     = _mk_label(ui, Vector2(24, 92), 40, Color.YELLOW)
-	_tile_info_lbl = _mk_label(ui, Vector2(24, 144), 18, Color(0.7, 0.7, 0.85))
+	_combo_lbl     = _mk_label(ui, Vector2(24, 92), 42, Color.YELLOW)
+	_tile_info_lbl = _mk_label(ui, Vector2(24, 148), 18, Color(0.7, 0.7, 0.85))
 
 	_judgment_lbl = Label.new()
-	_judgment_lbl.add_theme_font_size_override("font_size", 56)
+	_judgment_lbl.add_theme_font_size_override("font_size", 60)
 	_judgment_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_judgment_lbl.size     = Vector2(vp.x, 100)
+	_judgment_lbl.size     = Vector2(vp.x, 110)
 	_judgment_lbl.position = Vector2(0, vp.y * 0.14)
 	ui.add_child(_judgment_lbl)
 
@@ -117,6 +136,7 @@ func _ready_and_go() -> void:
 	if not is_inside_tree(): return
 	_judgment_lbl.text     = "GO!"
 	_judgment_lbl.modulate = Color(0.35, 1.00, 0.55)
+	_trigger_flash(Color(0.35, 1.0, 0.55), 0.35)
 	await get_tree().create_timer(0.35).timeout
 	if not is_inside_tree(): return
 	_judgment_lbl.text = ""
@@ -129,14 +149,29 @@ func _process(delta: float) -> void:
 		if _j_timer <= 0.0 and not _cleared:
 			_judgment_lbl.text = ""
 
-	# 자동 미스 : 회전자가 타겟을 T_BAD 만큼 지나쳤는데도 입력이 없으면
+	# 자동 미스
 	if running and pair.elapsed > pair.beat_time + T_BAD:
 		_register_miss()
 		_advance()
 
-	# 카메라 : 현재 피벗을 부드럽게 따라간다
+	# 카메라 팔로우 + 셰이크
 	if cam != null and pair != null:
 		cam.position = pair.pivot_pos
+		if _shake_time > 0.0:
+			_shake_time -= delta
+			cam.offset = Vector2(
+				randf_range(-1, 1) * _shake_intensity,
+				randf_range(-1, 1) * _shake_intensity
+			)
+			if _shake_time <= 0.0:
+				cam.offset = Vector2.ZERO
+		else:
+			cam.offset = Vector2.ZERO
+
+	# 화면 플래시 페이드
+	if _flash_alpha > 0.0:
+		_flash_alpha = maxf(0.0, _flash_alpha - delta * 3.5)
+		_flash_rect.color = Color(_flash_color.r, _flash_color.g, _flash_color.b, _flash_alpha)
 
 # ── 입력 ──
 func _input(event: InputEvent) -> void:
@@ -147,11 +182,13 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if ke.keycode == KEY_ESCAPE:
+		RenderingServer.set_default_clear_color(Color(0.04, 0.05, 0.09))
 		get_tree().change_scene_to_file("res://scenes/StageSelect.tscn")
 		return
 
 	if _cleared:
 		if ke.keycode == KEY_ENTER or ke.keycode == KEY_KP_ENTER or ke.keycode == KEY_SPACE:
+			RenderingServer.set_default_clear_color(Color(0.04, 0.05, 0.09))
 			get_tree().change_scene_to_file("res://scenes/StageSelect.tscn")
 		return
 
@@ -167,14 +204,18 @@ func _try_hit() -> void:
 	if abs_diff <= T_PERFECT:
 		_hit("PERFECT!", 300, Color.GOLD)
 		perfect_count += 1
+		_trigger_flash(Color(1.0, 0.9, 0.4), 0.28)
 	elif abs_diff <= T_GOOD:
 		_hit("GOOD", 100, Color.LIME_GREEN)
 		good_count += 1
+		_trigger_flash(Color(0.4, 1.0, 0.5), 0.16)
 	elif abs_diff <= T_BAD:
 		_hit("BAD", 30, Color.ORANGE)
 		bad_count += 1
+		_trigger_flash(Color(1.0, 0.6, 0.3), 0.10)
 	else:
 		_register_miss()
+		_trigger_flash(Color(1.0, 0.2, 0.2), 0.20)
 	_advance()
 
 func _hit(text: String, pts: int, color: Color) -> void:
@@ -204,7 +245,6 @@ func _start_next_rotation() -> void:
 	var pivot_pos: Vector2 = track.tiles[pivot_idx]
 	track.set_current(pivot_idx)
 
-	# 회전자의 시작 각도 = 피벗 → 이전 타일 방향
 	var start_angle: float
 	if pivot_idx == 0:
 		var first: Vector2 = track.tiles[1] - track.tiles[0]
@@ -216,27 +256,69 @@ func _start_next_rotation() -> void:
 	var to_next: Vector2 = track.tiles[pivot_idx + 1] - track.tiles[pivot_idx]
 	var end_angle: float = to_next.angle()
 
-	# CCW 회전량
 	var delta: float = end_angle - start_angle
 	while delta <= 0.001:
 		delta += TAU
 
-	# 180° 회전 = 1 비트. 시간 = 회전량 / PI * beat_time
 	var duration: float = (delta / PI) * _beat_time
 
 	pair.start_rotation(pivot_pos, start_angle, end_angle, duration)
 	running = true
 	_update_ui()
 
+# ── 클리어 → 폭발 이펙트 ──
 func _game_clear() -> void:
 	running = false
 	_cleared = true
 	pair.stop()
-	_judgment_lbl.text = "CLEAR!\n\nSCORE  %d   MAX COMBO  %d\nP:%d  G:%d  B:%d  M:%d\n\nENTER / SPACE 로 메뉴" % [
+
+	track.set_current(track.tiles.size() - 1)
+
+	# 마지막 타일 좌표에서 폭발 (swap_roles 후이므로 role은 신뢰 X)
+	var end_pos: Vector2 = track.tiles[track.tiles.size() - 1]
+	# 골드 폭발 (큰 확산)
+	_spawn_explosion(end_pos, Color(1.00, 0.85, 0.30), 120)
+	# 흰 폭발 (밝은 반짝임)
+	_spawn_explosion(end_pos, Color(1.0, 1.0, 1.0), 40)
+	# 카메라 셰이크
+	_shake_intensity = 12.0
+	_shake_time      = 0.5
+	# 화면 플래시
+	_trigger_flash(Color(1.0, 0.9, 0.5), 0.55)
+
+	_judgment_lbl.text = "★  CLEAR  ★\n\nSCORE  %d   MAX COMBO  %d\nP:%d  G:%d  B:%d  M:%d\n\nENTER / SPACE 로 메뉴" % [
 		score, max_combo, perfect_count, good_count, bad_count, miss_count
 	]
 	_judgment_lbl.modulate = Color.GOLD
 	_j_timer = 99999.0
+
+func _spawn_explosion(pos: Vector2, color: Color, amount: int) -> void:
+	var p := CPUParticles2D.new()
+	p.position                = pos
+	p.emitting                = true
+	p.one_shot                = true
+	p.explosiveness           = 1.0
+	p.amount                  = amount
+	p.lifetime                = 1.5
+	p.direction               = Vector2.UP
+	p.spread                  = 180.0
+	p.initial_velocity_min    = 220.0
+	p.initial_velocity_max    = 620.0
+	p.gravity                 = Vector2(0, 350)
+	p.scale_amount_min        = 4.0
+	p.scale_amount_max        = 9.0
+	p.color                   = color
+	p.damping_min             = 40.0
+	p.damping_max             = 120.0
+	add_child(p)
+	# 파티클 수명 지나면 자동 삭제
+	var t := get_tree().create_timer(3.0)
+	t.timeout.connect(p.queue_free)
+
+# ── 이펙트 헬퍼 ──
+func _trigger_flash(color: Color, alpha: float) -> void:
+	_flash_color = color
+	_flash_alpha = maxf(_flash_alpha, alpha)
 
 # ── UI ──
 func _show_judgment(text: String, color: Color) -> void:
