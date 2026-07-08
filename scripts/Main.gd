@@ -259,14 +259,14 @@ func _try_hit() -> void:
 	var abs_diff: float = absf(diff)
 
 	if abs_diff <= T_PERFECT:
-		_hit("PERFECT!", 300, Color.GOLD)
+		_hit("PERFECT!", 300, Color(1.00, 0.40, 0.80))
 		perfect_count += 1
 		_trigger_flash(Color.WHITE, 0.10 * _diff_mult)
 		_landing_cam_impulse(1.0)
 		if _bg_dots != null:
 			_bg_dots.trigger_pulse(1.0)
 	elif abs_diff <= T_GOOD:
-		_hit("GOOD", 100, Color.LIME_GREEN)
+		_hit("GOOD", 100, Color(0.35, 0.85, 1.00))
 		good_count += 1
 		_trigger_flash(Color.WHITE, 0.06 * _diff_mult)
 		_landing_cam_impulse(0.7)
