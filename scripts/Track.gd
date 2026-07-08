@@ -58,15 +58,7 @@ func _draw() -> void:
 	for i in tiles.size():
 		draw_circle(tiles[i], JOINT_R, _joint_color(i))
 
-	# 3. 지나온 타일 잔광 (은은한 금색 오버레이)
-	for i in range(current_tile):
-		if i >= 0 and i < tiles.size():
-			var dist: int = current_tile - i
-			var glow_a: float = maxf(0.0, 0.20 - dist * 0.02)
-			if glow_a > 0.001:
-				draw_circle(tiles[i], JOINT_R * 0.8, Color(1.0, 0.85, 0.35, glow_a))
-
-	# 4. 소도트 (박자 마커)
+	# 3. 소도트 (박자 마커) — 지나온 곳은 그냥 흐리게
 	for i in tiles.size():
 		var col: Color = _dot_color(i)
 		if col.a > 0.0:
@@ -118,7 +110,10 @@ func _draw() -> void:
 # ── 색상 헬퍼 ──
 func _road_color(i: int) -> Color:
 	if i < current_tile:
-		return Color(0.22, 0.18, 0.14)   # 지나온 : 따뜻한 어두운 톤 (남은 흔적)
+		# 지나온 : 뒤로 갈수록 더 어둡게 페이드
+		var dist: int = current_tile - i
+		var fade: float = maxf(0.10, 0.25 - dist * 0.015)
+		return Color(fade, fade, fade * 1.1)
 	elif i < current_tile + 3:
 		return Color(0.45, 0.47, 0.66)   # 활성 구간
 	else:
@@ -126,7 +121,9 @@ func _road_color(i: int) -> Color:
 
 func _joint_color(i: int) -> Color:
 	if i < current_tile:
-		return Color(0.22, 0.18, 0.14)
+		var dist: int = current_tile - i
+		var fade: float = maxf(0.10, 0.25 - dist * 0.015)
+		return Color(fade, fade, fade * 1.1)
 	elif i <= current_tile + 3:
 		return Color(0.45, 0.47, 0.66)
 	else:
@@ -136,6 +133,6 @@ func _dot_color(i: int) -> Color:
 	if i == current_tile or i == current_tile + 1 or i == tiles.size() - 1:
 		return Color(0, 0, 0, 0)  # 별도 강조되므로 스킵
 	elif i < current_tile:
-		return Color(1.0, 0.85, 0.35, 0.35)
+		return Color(1, 1, 1, 0.10)  # 지나온 : 그냥 흐린 흰 도트
 	else:
 		return Color(1, 1, 1, 0.40)
