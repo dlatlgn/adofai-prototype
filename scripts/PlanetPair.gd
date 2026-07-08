@@ -100,28 +100,30 @@ func _draw() -> void:
 	draw_arc(pivot_pos, ARM_LENGTH, 0.0, TAU, 80, Color(1, 1, 1, 0.18), 2.2, true)
 	draw_arc(pivot_pos, ARM_LENGTH, 0.0, TAU, 80, Color(1, 1, 1, 0.06), 8.0, true)
 
-	# 잔상 : 3층 불꽃 그라데이션 (외곽 짙은 → 중간 → 밝은 코어) + 플리커
-	# 오래된 것부터 그려 최신 잔상이 앞에 오도록
+	# 잔상 : 공 이미지의 복사본이 좌우로 흔들리며 페이드아웃
+	#   - 오래된 잔상일수록 지터 폭이 크고 크기가 줄어들며 알파도 낮아짐
+	#   - 각 인덱스 위상 오프셋으로 개별적으로 흔들려 "타오르는" 불규칙성 연출
 	for i in TRAIL_LEN:
 		var life: float = float(i) / float(TRAIL_LEN - 1)   # 0=oldest, 1=newest
-		var flicker: float = 0.80 + sin(_time * 12.0 + float(i) * 1.7) * 0.20
-		var life2: float = life * life                       # 급격한 페이드
+		if life < 0.05:
+			continue
+		var age: float = 1.0 - life
+		var jitter_amp: float = age * 11.0 + 2.0
+		var jitter_x: float = sin(_time * 18.0 + float(i) * 2.3) * jitter_amp
+		var jitter: Vector2 = Vector2(jitter_x, 0.0)
+		var fade: float = life * life
 
-		# --- Fire trail : 짙은 붉음 → 오렌지 → 노랑 코어 ---
-		var f_pos: Vector2 = _fire_trail[i]
-		var f_r: float = fire.radius * life * 0.95 * flicker
-		draw_circle(f_pos, f_r * 1.55, Color(0.90, 0.13, 0.04, life2 * 0.45))    # 외곽 옅은 진홍
-		draw_circle(f_pos, f_r * 1.00, Color(1.00, 0.42, 0.10, life * 0.65))     # 중간 오렌지
-		draw_circle(f_pos, f_r * 0.55, Color(1.00, 0.88, 0.50, life * 0.78))     # 밝은 노랑
-		draw_circle(f_pos, f_r * 0.25, Color(1.00, 0.98, 0.85, life * 0.85))     # 흰빛 코어
+		_draw_ghost(_fire_trail[i] + jitter, fire.radius, life, fade, Color(1.00, 0.35, 0.10))
+		_draw_ghost(_ice_trail[i] + jitter,  ice.radius,  life, fade, Color(0.30, 0.72, 1.00))
 
-		# --- Ice trail : 짙은 파랑 → 시안 → 백청 코어 (푸른 불꽃) ---
-		var i_pos: Vector2 = _ice_trail[i]
-		var i_r: float = ice.radius * life * 0.95 * flicker
-		draw_circle(i_pos, i_r * 1.55, Color(0.05, 0.20, 0.85, life2 * 0.45))    # 외곽 짙은 파랑
-		draw_circle(i_pos, i_r * 1.00, Color(0.20, 0.65, 1.00, life * 0.65))     # 중간 시안
-		draw_circle(i_pos, i_r * 0.55, Color(0.75, 0.92, 1.00, life * 0.78))     # 밝은 백청
-		draw_circle(i_pos, i_r * 0.25, Color(0.95, 0.98, 1.00, life * 0.85))     # 흰빛 코어
+func _draw_ghost(pos: Vector2, base_r: float, life: float, fade: float, base: Color) -> void:
+	# 실제 공의 축소·페이드 복사본 (외곽 글로우 + 본체 + 얇은 흰 테두리)
+	var r: float = base_r * (0.55 + life * 0.45)
+	draw_circle(pos, r + 10.0, Color(base.r, base.g, base.b, fade * 0.12))  # outer glow
+	draw_circle(pos, r + 5.0,  Color(base.r, base.g, base.b, fade * 0.26))  # inner glow
+	draw_circle(pos, r,        Color(base.r, base.g, base.b, fade * 0.75))  # body
+	if life > 0.35:
+		draw_arc(pos, r, 0.0, TAU, 40, Color(1, 1, 1, fade * 0.5), 1.4, true)
 
 func trigger_landing_pulse() -> void:
 	if fire_is_pivot:
