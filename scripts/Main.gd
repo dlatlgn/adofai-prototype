@@ -19,6 +19,9 @@ var _tile_info_lbl: Label
 var _stage_lbl: Label
 var _flash_rect: ColorRect
 
+# 배경 땡땡이
+var _bg_dots: BackgroundDots
+
 # ── 게임 상태 ──
 var pivot_idx: int = 0
 var running: bool = false
@@ -33,9 +36,8 @@ var good_count: int = 0
 var bad_count: int = 0
 var miss_count: int = 0
 
-# 화면 플래시
+# 화면 플래시 (아주 여린 흰색으로 통일)
 var _flash_alpha: float = 0.0
-var _flash_color: Color = Color.WHITE
 
 # 카메라 셰이크
 var _shake_time: float = 0.0
@@ -65,6 +67,16 @@ func _ready() -> void:
 
 	# ── 검은 배경 ──
 	RenderingServer.set_default_clear_color(Color.BLACK)
+
+	# ── 배경 땡땡이 (게임 월드 뒤 CanvasLayer) ──
+	var bg_layer := CanvasLayer.new()
+	bg_layer.name  = "BG"
+	bg_layer.layer = -1
+	add_child(bg_layer)
+
+	_bg_dots = BackgroundDots.new()
+	_bg_dots.viewport_size = vp
+	bg_layer.add_child(_bg_dots)
 
 	# ── 스테이지 로드 ──
 	_stage      = StageData.current()
@@ -153,7 +165,7 @@ func _ready_and_go() -> void:
 	if not is_inside_tree(): return
 	_judgment_lbl.text     = "GO!"
 	_judgment_lbl.modulate = Color(0.35, 1.00, 0.55)
-	_trigger_flash(Color(0.35, 1.0, 0.55), 0.35)
+	_trigger_flash(Color.WHITE, 0.12)
 	await get_tree().create_timer(0.35).timeout
 	if not is_inside_tree(): return
 	_judgment_lbl.text = ""
@@ -207,10 +219,10 @@ func _process(delta: float) -> void:
 			if _zoom_time <= 0.0:
 				cam.zoom = Vector2.ONE
 
-	# 화면 플래시 페이드
+	# 화면 플래시 페이드 (아주 여린 흰색)
 	if _flash_alpha > 0.0:
 		_flash_alpha = maxf(0.0, _flash_alpha - delta * 3.5)
-		_flash_rect.color = Color(_flash_color.r, _flash_color.g, _flash_color.b, _flash_alpha)
+		_flash_rect.color = Color(1.0, 1.0, 1.0, _flash_alpha)
 
 # ── 입력 ──
 func _input(event: InputEvent) -> void:
@@ -232,6 +244,8 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if ke.keycode == KEY_SPACE or ke.keycode == KEY_ENTER or ke.keycode == KEY_KP_ENTER:
+		if _bg_dots != null and running:
+			_bg_dots.trigger_pulse(0.65)
 		_try_hit()
 
 func _try_hit() -> void:
@@ -247,17 +261,21 @@ func _try_hit() -> void:
 	if abs_diff <= T_PERFECT:
 		_hit("PERFECT!", 300, Color.GOLD)
 		perfect_count += 1
-		_trigger_flash(Color(1.0, 0.9, 0.4), 0.22 * _diff_mult)
+		_trigger_flash(Color.WHITE, 0.10 * _diff_mult)
 		_landing_cam_impulse(1.0)
+		if _bg_dots != null:
+			_bg_dots.trigger_pulse(1.0)
 	elif abs_diff <= T_GOOD:
 		_hit("GOOD", 100, Color.LIME_GREEN)
 		good_count += 1
-		_trigger_flash(Color(0.4, 1.0, 0.5), 0.14 * _diff_mult)
+		_trigger_flash(Color.WHITE, 0.06 * _diff_mult)
 		_landing_cam_impulse(0.7)
+		if _bg_dots != null:
+			_bg_dots.trigger_pulse(0.8)
 	elif abs_diff <= T_BAD:
 		_hit("BAD", 30, Color.ORANGE)
 		bad_count += 1
-		_trigger_flash(Color(1.0, 0.6, 0.3), 0.10 * _diff_mult)
+		_trigger_flash(Color.WHITE, 0.04 * _diff_mult)
 		_landing_cam_impulse(0.4)
 	else:
 		_register_miss()
@@ -276,8 +294,8 @@ func _register_miss() -> void:
 	miss_count += 1
 	_show_judgment("MISS", Color(1, 0.35, 0.35))
 	_update_ui()
-	# 미스 : 큰 적색 플래시 + 강한 셰이크 (난이도 스케일)
-	_trigger_flash(Color(1.0, 0.2, 0.2), 0.22 * _diff_mult)
+	# 미스 : 흰 플래시 + 강한 셰이크 (난이도 스케일)
+	_trigger_flash(Color.WHITE, 0.08 * _diff_mult)
 	_shake_intensity = 6.0 * _diff_mult
 	_shake_time      = 0.28
 	# 회전 임펄스도 더 강하게
@@ -363,8 +381,10 @@ func _game_clear() -> void:
 	# 회전 임펄스 강하게
 	_rot_target = randf_range(-1, 1) * 0.08 * _diff_mult
 	_rot_time   = CAM_IMPULSE_DUR * 1.4
-	# 화면 플래시
-	_trigger_flash(Color(1.0, 0.9, 0.5), 0.55 * _diff_mult)
+	# 화면 플래시 (클리어는 좀 더 크게)
+	_trigger_flash(Color.WHITE, 0.28 * _diff_mult)
+	if _bg_dots != null:
+		_bg_dots.trigger_pulse(1.0)
 
 	_judgment_lbl.text = "★  CLEAR  ★\n\nSCORE  %d   MAX COMBO  %d\nP:%d  G:%d  B:%d  M:%d\n\nENTER / SPACE 로 메뉴" % [
 		score, max_combo, perfect_count, good_count, bad_count, miss_count
@@ -396,8 +416,8 @@ func _spawn_explosion(pos: Vector2, color: Color, amount: int) -> void:
 	t.timeout.connect(p.queue_free)
 
 # ── 이펙트 헬퍼 ──
-func _trigger_flash(color: Color, alpha: float) -> void:
-	_flash_color = color
+# 색상 인자는 하위 호환용 (실제 오버레이는 항상 흰색)
+func _trigger_flash(_color: Color, alpha: float) -> void:
 	_flash_alpha = maxf(_flash_alpha, alpha)
 
 # ── UI ──
